@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 214 100% 99%;
+  --foreground: 222 47% 11%;
+  --card: 0 0% 100%;
+  --border: 215 23% 90%;
+  --muted: 220 14% 96%;
+  --ring: 221 83% 53%;
+  --primary: 221 83% 53%;
+  --secondary: 210 40% 96%;
+}
+
+.dark {
+  --background: 222 47% 8%;
+  --foreground: 210 40% 98%;
+  --card: 222 47% 11%;
+  --border: 217 33% 20%;
+  --muted: 217 33% 16%;
+  --ring: 213 94% 68%;
+  --primary: 213 94% 68%;
+  --secondary: 217 33% 18%;
+}
+
+html { scroll-behavior: smooth; }
+body { @apply bg-background text-foreground antialiased; }
+
+.section { @apply py-16 md:py-20; }
+.container-page { @apply mx-auto max-w-6xl px-4 sm:px-6 lg:px-8; }
+.card { @apply rounded-2xl border border-border bg-card shadow-soft; }
+.input { @apply mt-1 w-full rounded-xl border border-border bg-background px-3 py-2 outline-none ring-offset-2 focus:ring-2 focus:ring-ring; }
+.label { @apply text-sm font-medium; }
+.helper { @apply text-xs text-slate-500 dark:text-slate-400; }
