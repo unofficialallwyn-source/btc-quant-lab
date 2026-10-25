@@ -16,7 +16,7 @@ def test_overlap_middle_splits_into_missing_and_skipped():
 
 def test_adjacent_manifests_credit_complete_window():
     assert summarized(classify([(0,7*DAY)],[record(0,2),record(2,7)]))==[
-        ("skip",0,2),("skip",2,7)]
+        ("skip",0,7)]
 
 def test_gaps_stay_inside_requested_bounds():
     assert summarized(classify([(3*DAY,9*DAY)],[record(0,5),record(7,12)]))==[
