@@ -51,29 +51,27 @@ def inventory(client, prefix=PREFIX, verify_bytes=True):
     return sorted(records,key=lambda x:x["start"])
 
 def classify(windows, stored):
-    """Fully covered windows are skipped; partial overlaps block execution."""
+    """Split requested windows at verified coverage boundaries, downloading gaps only.
+
+    A malformed partial-day boundary is rejected, never silently rounded.
+    """
+    from .coverage_plan import coverage
     selected=[]
     for lo,hi in windows:
-        overlaps=[x for x in stored if x["start"]<hi and x["end"]>lo]
-        pos=lo
-        for x in sorted(overlaps,key=lambda y:y["start"]):
-            if x["start"] > pos:
-                break
-            pos=max(pos,x["end"])
-        if pos >= hi:
-            selected.append(("skip",lo,hi))
-        elif overlaps:
-            selected.append(("overlap",lo,hi))
-        else:
-            selected.append(("fetch",lo,hi))
+        verified,missing=coverage(stored,lo,hi)
+        boundaries=sorted({lo,hi} | {x for interval in verified+missing for x in interval})
+        for start,end in zip(boundaries,boundaries[1:]):
+            if start==end: continue
+            if start % DAY or end % DAY:
+                raise ValueError("Coverage is not UTC-day aligned; unsafe to fetch partial days")
+            status="skip" if any(a<=start and end<=b for a,b in verified) else "fetch"
+            selected.append((status,start,end))
     return selected
 
 def execute(start,end,url,workspace,days=7,dry_run=False,verify_bytes=True):
     client=client_from_url(url)
     stored=inventory(client,verify_bytes=verify_bytes)
     windows=classify(plan(start,end,days),stored)
-    if any(state=="overlap" for state,_,_ in windows):
-        raise ValueError("Partial overlap with existing Azure data: choose aligned nonoverlapping dates or use 1-day chunks")
     for state,lo,hi in windows:
         print(f"{state.upper()} UTC [{lo},{hi})",flush=True)
     if dry_run: return windows
