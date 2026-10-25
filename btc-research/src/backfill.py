@@ -14,7 +14,12 @@ def main():
     p.add_argument('--directory',default='data/raw/BTCUSD/1m')
     p.add_argument('--window-minutes',type=int,default=1800)
     args=p.parse_args()
-    report=collect(fetch_candles,utc_epoch(args.start),utc_epoch(args.end),args.directory,window_minutes=args.window_minutes)
+    start,end=utc_epoch(args.start),utc_epoch(args.end)
+    if end <= start or end-start > 7*86400:
+        p.error('Run one contiguous window of 1 to 7 UTC days; split larger history into multiple workflow runs')
+    if not 1 <= args.window_minutes <= 1800:
+        p.error('Delta REST requests must be 1..1800 minutes')
+    report=collect(fetch_candles,start,end,args.directory,window_minutes=args.window_minutes)
     print(f'Validated {sum(x["rows"] for x in report)} candles in {len(report)} partitions')
 
 if __name__=='__main__': main()
