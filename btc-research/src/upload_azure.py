@@ -1,5 +1,6 @@
 """Optional durable storage of verified partitions to a private Azure Blob container."""
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -18,6 +19,8 @@ def upload(directory, container_url, prefix="historical/BTCUSD/1m", client_facto
             raise ValueError("Unsafe manifest filename")
         if not (path/item["filename"]).is_file():
             raise ValueError("Missing referenced partition")
+        if hashlib.sha256((path/item["filename"]).read_bytes()).hexdigest() != item["sha256"]:
+            raise ValueError("Partition checksum mismatch")
     client = (client_factory or ContainerClient.from_container_url)(container_url)
     uploaded = []
     # Upload parquet before manifest so manifest indicates completed batch.
