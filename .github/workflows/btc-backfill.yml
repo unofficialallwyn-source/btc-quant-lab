@@ -16,6 +16,8 @@ jobs:
     timeout-minutes: 330
     permissions:
       contents: read
+    env:
+      HAS_STORAGE: ${{ secrets.AZURE_BLOB_CONTAINER_SAS_URL != '' }}
     defaults:
       run:
         working-directory: btc-research
@@ -43,6 +45,5 @@ jobs:
       - name: Persist to Azure Blob (if configured)
         if: success() && env.HAS_STORAGE == 'true'
         env:
-          HAS_STORAGE: ${{ secrets.AZURE_BLOB_CONTAINER_SAS_URL != '' }}
           AZURE_BLOB_CONTAINER_SAS_URL: ${{ secrets.AZURE_BLOB_CONTAINER_SAS_URL }}
         run: python -m src.upload_azure --directory data/raw/BTCUSD/1m --prefix historical/BTCUSD/1m
