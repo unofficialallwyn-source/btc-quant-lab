@@ -1,0 +1,61 @@
+name: BTC multi-year controller
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: Inclusive UTC date
+        required: true
+        default: '2024-03-01'
+      end:
+        description: Exclusive UTC date
+        required: true
+        default: '2026-10-25'
+      execute:
+        description: Download selected missing range (off for planning)
+        type: boolean
+        required: true
+        default: false
+  schedule:
+    - cron: '25 2 * * *'
+concurrency:
+  group: btc-cloud-backfill
+  cancel-in-progress: false
+jobs:
+  controller:
+    if: github.event_name == 'workflow_dispatch' || vars.BTC_MULTIYEAR_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: btc-research
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: btc-research/requirements.txt
+      - run: python -m pip install -r requirements.txt
+      - run: python -m pytest -q
+      - name: Inventory and optional backfill
+        env:
+          AZURE_BLOB_CONTAINER_SAS_URL: ${{ secrets.AZURE_BLOB_CONTAINER_SAS_URL }}
+          WINDOW_START: ${{ inputs.start || '2024-03-01' }}
+          WINDOW_END: ${{ inputs.end || '2026-10-25' }}
+          ALLOW_EXECUTION: ${{ github.event_name == 'schedule' || inputs.execute }}
+        run: |
+          if [ "$ALLOW_EXECUTION" = "true" ]; then
+            python -m src.multi_year --start "$WINDOW_START" --end "$WINDOW_END" --execute
+          else
+            python -m src.multi_year --start "$WINDOW_START" --end "$WINDOW_END"
+          fi
+      - name: Archive coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: btc-coverage-${{ github.run_id }}
+          path: btc-research/data/coverage.json
+          retention-days: 30
+          if-no-files-found: warn
