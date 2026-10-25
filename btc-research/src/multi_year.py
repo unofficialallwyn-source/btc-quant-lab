@@ -3,14 +3,14 @@ import argparse
 import json
 import os
 from pathlib import Path
-from azure.storage.blob import ContainerClient
+from .blob_auth import client_from_url, storage_url
 from .cloud_backfill import DAY, epoch, inventory, execute
 from .coverage_plan import coverage, next_window, iso
 
 def run(start,end,url,workspace,dry_run=True,report_path="data/coverage.json"):
     if start>=end or start%DAY or end%DAY:
         raise ValueError("Start/end must be aligned UTC dates")
-    stored=inventory(ContainerClient.from_container_url(url))
+    stored=inventory(client_from_url(url))
     verified,missing=coverage(stored,start,end)
     target=next_window(stored,start,end)
     report={
@@ -38,8 +38,7 @@ def main():
     p.add_argument("--workspace",default="data/backfill")
     p.add_argument("--execute",action="store_true")
     a=p.parse_args()
-    url=os.environ.get("AZURE_BLOB_CONTAINER_SAS_URL")
-    if not url: p.error("Missing AZURE_BLOB_CONTAINER_SAS_URL")
+    url=storage_url()
     run(epoch(a.start),epoch(a.end),url,a.workspace,dry_run=not a.execute)
 
 if __name__=="__main__":
