@@ -1,0 +1,49 @@
+name: BTC historical backfill
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: 'Start date inclusive (UTC YYYY-MM-DD)'
+        required: true
+        default: '2025-07-01'
+      end:
+        description: 'End date exclusive (UTC YYYY-MM-DD)'
+        required: true
+        default: '2025-07-02'
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    permissions:
+      contents: read
+    env:
+      HAS_STORAGE: ${{ secrets.AZURE_BLOB_CONTAINER_SAS_URL != '' }}
+    defaults:
+      run:
+        working-directory: btc-research
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: btc-research/requirements.txt
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Run tests
+        run: python -m pytest -q
+      - name: Fetch BTC minute data
+        run: python -m src.backfill --start "${{ inputs.start }}" --end "${{ inputs.end }}" --directory data/raw/BTCUSD/1m
+      - name: Upload historical partition artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: btcusd-1m-${{ inputs.start }}-${{ inputs.end }}
+          path: btc-research/data/raw/BTCUSD/1m/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Persist to Azure Blob (if configured)
+        if: success() && env.HAS_STORAGE == 'true'
+        env:
+          AZURE_BLOB_CONTAINER_SAS_URL: ${{ secrets.AZURE_BLOB_CONTAINER_SAS_URL }}
+        run: python -m src.upload_azure --directory data/raw/BTCUSD/1m --prefix historical/BTCUSD/1m
