@@ -23,7 +23,8 @@ def upload(directory, container_url, prefix="historical/BTCUSD/1m", client_facto
             raise ValueError("Partition checksum mismatch")
         if i and records[i-1]["end_exclusive"] != item["start"]:
             raise ValueError("Noncontiguous partition windows")
-    client=(client_factory or ContainerClient.from_container_url)(container_url)
+    from .blob_auth import client_from_url
+    client=client_from_url(container_url,client_factory)
     destination=prefix.strip("/")
     completed=[]
     for item in records:
