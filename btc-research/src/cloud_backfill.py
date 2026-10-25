@@ -6,7 +6,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-from azure.storage.blob import ContainerClient
+from .blob_auth import client_from_url, storage_url
 from .delta_client import fetch_candles
 from .historical import collect
 from .upload_azure import upload
@@ -69,7 +69,7 @@ def classify(windows, stored):
     return selected
 
 def execute(start,end,url,workspace,days=7,dry_run=False,verify_bytes=True):
-    client=ContainerClient.from_container_url(url)
+    client=client_from_url(url)
     stored=inventory(client,verify_bytes=verify_bytes)
     windows=classify(plan(start,end,days),stored)
     if any(state=="overlap" for state,_,_ in windows):
@@ -96,8 +96,7 @@ def main():
     a=p.parse_args()
     start,end=epoch(a.start),epoch(a.end)
     if end-start>28*DAY: p.error("Maximum 28 days per workflow run; split into more runs")
-    url=os.environ.get("AZURE_BLOB_CONTAINER_SAS_URL")
-    if not url: p.error("AZURE_BLOB_CONTAINER_SAS_URL is required")
+    url=storage_url()
     result=execute(start,end,url,a.workspace,days=a.days,dry_run=a.dry_run)
     print(json.dumps({"windows":len(result),"skipped":sum(x[0]=="skip" for x in result),"fetched":sum(x[0]=="fetch" for x in result)},indent=2))
 
