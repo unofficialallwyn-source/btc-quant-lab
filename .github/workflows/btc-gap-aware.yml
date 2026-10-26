@@ -1,0 +1,78 @@
+name: BTC gap-aware collection (manual)
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: Inclusive UTC date
+        required: true
+        default: '2024-02-03'
+      end:
+        description: Exclusive UTC date (empty = completed days through today)
+        required: false
+        default: ''
+      max_days:
+        description: Maximum individual day attempts (1-28)
+        required: true
+        type: choice
+        options: ['1', '4', '7', '14', '28']
+        default: '4'
+      execute:
+        description: Download/upload (false = audit only)
+        type: boolean
+        required: true
+        default: false
+      retry_gaps:
+        description: Recheck previously unavailable days
+        type: boolean
+        required: true
+        default: false
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: btc-cloud-backfill
+  cancel-in-progress: false
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    defaults:
+      run:
+        working-directory: btc-research
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: btc-research/requirements.txt
+      - run: python -m pip install -r requirements.txt
+      - run: python -m pytest -q
+      - name: Authenticate to Azure via OIDC
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Collect verified complete days and record missing source days
+        env:
+          BTC_AZURE_AUTH: oidc
+          HISTORY_START: ${{ inputs.start }}
+          HISTORY_END: ${{ inputs.end }}
+          MAX_DAYS: ${{ inputs.max_days }}
+          EXECUTE: ${{ inputs.execute }}
+          RETRY_GAPS: ${{ inputs.retry_gaps }}
+        run: |
+          opts=(--start "$HISTORY_START" --max-days "$MAX_DAYS")
+          if [ -n "$HISTORY_END" ]; then opts+=(--end "$HISTORY_END"); fi
+          if [ "$EXECUTE" = "true" ]; then opts+=(--execute); fi
+          if [ "$RETRY_GAPS" = "true" ]; then opts+=(--retry-gaps); fi
+          python -m src.gap_aware "${opts[@]}"
+      - name: Archive coverage and source-gap registry report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: btc-gap-aware-${{ github.run_id }}
+          path: btc-research/data/gap-aware-progress.json
+          if-no-files-found: warn
+          retention-days: 30
