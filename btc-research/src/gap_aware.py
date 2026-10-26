@@ -8,7 +8,7 @@ import json
 from datetime import datetime, timezone
 
 from .blob_auth import client_from_url, storage_url
-from .cloud_backfill import DAY, PREFIX, epoch, inventory, execute
+from .cloud_backfill import DAY, PREFIX, epoch, inventory, execute, verify_manifest
 from .coverage_plan import coverage, iso
 
 GAP_PREFIX = PREFIX + "/source_gaps/"
@@ -43,10 +43,13 @@ def collect_days(start, end, url, workspace, max_days=4, download=False,
         raise ValueError("Invalid UTC dates or max_days (1..28)")
     client = client_from_url(url)
     attempts, fatal = [], None
+    initial_audit_complete = False
     try:
+        # Full SHA-256 verification once at the start, not before each day.
+        stored = inventory(client)
+        gaps = gap_records(client)
+        initial_audit_complete = True
         for _ in range(max_days):
-            stored = inventory(client)
-            gaps = gap_records(client)
             blocked = set() if retry_gaps else set(gaps)
             day = next_day(stored, blocked, start, end)
             if day is None:
@@ -57,13 +60,19 @@ def collect_days(start, end, url, workspace, max_days=4, download=False,
             if not download:
                 break
             try:
-                # A partial source day is never represented as an ordinary valid partition.
-                execute(day, day+DAY, url, Path(workspace)/str(day), days=1)
-                attempt["state"] = "uploaded_pending_audit"
-                # Remove older gap record only after a successful re-read audit.
-                inventory(client)
+                # Reuse the already-verified inventory when choosing this day's download.
+                execute(day,day+DAY,url,Path(workspace)/str(day),
+                        days=1,stored=stored)
+                # Credit only this newly uploaded manifest after its own SHA-256 read-back.
+                name=f"{PREFIX}/manifests/BTCUSD_1m_{day}_{day+DAY}.json"
+                record=verify_manifest(client,name)
+                if record["start"] != day or record["end"] != day+DAY:
+                    raise RuntimeError("Uploaded manifest covers unexpected UTC day")
+                stored.append(record)
+                attempt["state"]="verified"
                 if day in gaps:
                     client.delete_blob(f"{GAP_PREFIX}{day}.json")
+                    del gaps[day]
             except ValueError as exc:
                 if "Missing candles" not in str(exc) and "No data in" not in str(exc):
                     raise
@@ -78,9 +87,10 @@ def collect_days(start, end, url, workspace, max_days=4, download=False,
                 client.upload_blob(name=f"{GAP_PREFIX}{day}.json",
                                    data=json.dumps(record,indent=2).encode(),
                                    overwrite=True)
+                gaps[day]=record
                 attempt["state"]="source_gap_recorded"
                 attempt["diagnostic"]=str(exc)
-            # All other failures propagate and are never marked as source gaps.
+            # Network, authentication, and integrity failures must stop collection.
     except Exception as exc:
         fatal=f"{type(exc).__name__}: {exc}"
     # Report even on partial Azure / API failure. Do not mask errors.
@@ -102,6 +112,8 @@ def collect_days(start, end, url, workspace, max_days=4, download=False,
         "source_gap_days":unresolved,
         "fully_complete":not missing and not fatal and not audit_error,
         "attempts":attempts,"dry_run":not download,
+        "initial_audit_complete":initial_audit_complete,
+        "audit_strategy":"initial_full_sha256_plus_per_upload_sha256_plus_final_full_sha256",
         "error":fatal,"audit_error":audit_error,
     }
     path=Path(report)
