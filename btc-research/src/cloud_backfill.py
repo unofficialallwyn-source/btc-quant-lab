@@ -22,32 +22,42 @@ def plan(start, end, days=7):
         raise ValueError("UTC dates must span whole days; chunk length 1..7 days")
     return [(lo, min(end,lo+days*DAY)) for lo in range(start,end,days*DAY)]
 
+def verify_manifest(client, name, prefix=PREFIX, verify_bytes=True):
+    """Verify one named manifest and every referenced partition before crediting it."""
+    expected_prefix=f"{prefix}/manifests/"
+    if not name.startswith(expected_prefix) or not name.endswith(".json"):
+        raise ValueError("Manifest name outside expected prefix")
+    try:
+        data=json.loads(client.get_blob_client(name).download_blob().readall())
+        if not isinstance(data,list) or not data:
+            raise ValueError("Empty or malformed manifest")
+        for i,part in enumerate(data):
+            lo,hi=int(part["start"]),int(part["end_exclusive"])
+            if lo >= hi or (hi-lo)//60 != int(part["rows"]):
+                raise ValueError("Malformed interval")
+            if i and int(data[i-1]["end_exclusive"]) != lo:
+                raise ValueError("Noncontiguous manifest")
+            filename=part["filename"]
+            if not isinstance(filename,str) or Path(filename).name != filename:
+                raise ValueError("Unsafe filename")
+            blob=client.get_blob_client(f"{prefix}/{filename}")
+            if verify_bytes:
+                actual=hashlib.sha256(blob.download_blob().readall()).hexdigest()
+                if actual != part["sha256"]:
+                    raise ValueError("SHA mismatch")
+            else:
+                blob.get_blob_properties()
+        return dict(start=int(data[0]["start"]),end=int(data[-1]["end_exclusive"]),
+                    name=name,rows=sum(int(p["rows"]) for p in data))
+    except Exception as exc:
+        raise RuntimeError(f"Cloud manifest verification failed: {name}: {exc}") from exc
+
+
 def inventory(client, prefix=PREFIX, verify_bytes=True):
-    """Only credit data whose complete manifest and referenced blobs are valid."""
+    """Verify all indexed manifests; use at run boundaries, not on every day."""
     records=[]
-    manifest_prefix=f"{prefix}/manifests/"
-    for item in client.list_blobs(name_starts_with=manifest_prefix):
-        name=item.name
-        try:
-            data=json.loads(client.get_blob_client(name).download_blob().readall())
-            if not data: raise ValueError("Empty manifest")
-            for i,part in enumerate(data):
-                lo,hi=int(part["start"]),int(part["end_exclusive"])
-                if lo >= hi or (hi-lo)//60 != int(part["rows"]):
-                    raise ValueError("Malformed interval")
-                if i and int(data[i-1]["end_exclusive"]) != lo:
-                    raise ValueError("Noncontiguous manifest")
-                filename=part["filename"]
-                if Path(filename).name != filename: raise ValueError("Unsafe filename")
-                blob=client.get_blob_client(f"{prefix}/{filename}")
-                if verify_bytes:
-                    actual=hashlib.sha256(blob.download_blob().readall()).hexdigest()
-                    if actual != part["sha256"]: raise ValueError("SHA mismatch")
-                else:
-                    blob.get_blob_properties()
-            records.append(dict(start=int(data[0]["start"]),end=int(data[-1]["end_exclusive"]),name=name,rows=sum(int(p["rows"]) for p in data)))
-        except Exception as exc:
-            raise RuntimeError(f"Cloud manifest verification failed: {name}: {exc}") from exc
+    for item in client.list_blobs(name_starts_with=f"{prefix}/manifests/"):
+        records.append(verify_manifest(client,item.name,prefix,verify_bytes))
     return sorted(records,key=lambda x:x["start"])
 
 def classify(windows, stored):
@@ -68,9 +78,10 @@ def classify(windows, stored):
             selected.append((status,start,end))
     return selected
 
-def execute(start,end,url,workspace,days=7,dry_run=False,verify_bytes=True):
+def execute(start,end,url,workspace,days=7,dry_run=False,verify_bytes=True,stored=None):
     client=client_from_url(url)
-    stored=inventory(client,verify_bytes=verify_bytes)
+    if stored is None:
+        stored=inventory(client,verify_bytes=verify_bytes)
     windows=classify(plan(start,end,days),stored)
     for state,lo,hi in windows:
         print(f"{state.upper()} UTC [{lo},{hi})",flush=True)
