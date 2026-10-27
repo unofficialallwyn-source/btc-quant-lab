@@ -24,7 +24,7 @@ class RiskPolicy:
     risk_fraction:float=.005
     max_exposure:float=1.
     initial_equity:float=1000.
-    entry_mode:str="transition"  # "level" retains prior baseline for paired comparison
+    entry_mode:str="level"  # "level" retains prior baseline for paired comparison
 
     def validate(self):
         if self.entry_mode not in ("transition","level"):
