@@ -41,7 +41,12 @@ def _csv(path,value_name,*,interval):
 def load_inputs(folder):
     folder=Path(folder)
     manifest=json.loads((folder/"source_manifest.json").read_text())
-    for name in ("mark_source","fx_source","funding_source","methodology","recorded_utc"):
+    for name in ("mark_source","funding_source","methodology","recorded_utc"):
+        if not str(manifest.get(name,"")).strip():
+            raise ValueError(f"Missing historical-input provenance: {name}")
+    if manifest.get("fx_policy")!="delta_india_fixed_85" and not str(manifest.get("fx_source","")).strip():
+        raise ValueError("Missing historical-input provenance: fx_source")
+    for name in ():
         if not str(manifest.get(name,"")).strip():
             raise ValueError(f"Missing historical-input provenance: {name}")
     if manifest.get("synthetic",False):
@@ -49,7 +54,13 @@ def load_inputs(folder):
     if manifest.get("methodology") in ("assumed_constant","inferred_from_traded_candles"):
         raise ValueError("Assumed FX/mark/funding inputs forbidden")
     mark=_csv(folder/FILES["mark"],SCHEMA["mark"],interval=60)
-    fx=_csv(folder/FILES["fx"],SCHEMA["fx"],interval=60)
+    if manifest.get("fx_policy")=="delta_india_fixed_85":
+        if not manifest.get("fx_policy_reference") or not manifest.get("fx_policy_effective_period_verified"):
+            raise ValueError("Fixed INR/USD policy requires an official source and historical period verification")
+        # This is a policy conversion, not an observed spot-market FX series.
+        fx=pd.Series(85.0,index=mark.index,dtype=float)
+    else:
+        fx=_csv(folder/FILES["fx"],SCHEMA["fx"],interval=60)
     funding=_csv(folder/FILES["funding"],SCHEMA["funding"],interval=28800)
     return manifest,mark,fx,funding.to_dict()
 
