@@ -1,7 +1,7 @@
 """Phase 3 deterministic risk-policy comparisons (training only by default)."""
 import argparse
 import json
-from dataclasses import asdict
+from dataclasses import asdict,replace
 from pathlib import Path
 import hashlib
 
@@ -31,17 +31,30 @@ def evaluate(catalog_dir,output,signal_tf="5m",context_tf="1h"):
     for name in ("trend","mean_reversion","volatility_breakout"):
         spec=Strategy(name=name,signal_tf=signal_tf,context_tf=context_tf)
         spec.check()
-        metrics,ledger,equity=run_risk(partition,lambda frame:signals(frame,spec),cfg,signal_tf)
-        ledger.to_csv(root/f"{name}_training_trades.csv",index=False)
-        equity.to_csv(root/f"{name}_training_equity.csv",index=False)
-        report["strategies"][name]={"signal_parameters":asdict(spec),"training":metrics,
-            "diagnostics":{"net_pnl_check":float(ledger.net_pnl.sum()) if len(ledger) else 0.0,
-                "fees_to_initial_equity_pct":100*metrics["fee_total"]/cfg.initial_equity,
-                "exit_reason_counts":metrics["exit_reasons"],
-                "entry_decisions":metrics["entry_decisions"],
-                "total_holding_hours":float((ledger.exit_time-ledger.entry_time).sum()/3600) if len(ledger) else 0.0}}
-        if abs(metrics["ending_equity"]-(cfg.initial_equity+float(ledger.net_pnl.sum())))>1e-4:
-            raise ValueError("Risk engine balance does not reconcile to ledger")
+        comparisons={}
+        for mode in ("level","transition"):
+            run_cfg=replace(cfg,entry_mode=mode)
+            metrics,ledger,equity=run_risk(partition,lambda frame:signals(frame,spec),run_cfg,signal_tf)
+            ledger.to_csv(root/f"{name}_{mode}_training_trades.csv",index=False)
+            equity.to_csv(root/f"{name}_{mode}_training_equity.csv",index=False)
+            checks={
+                "ledger_net_pnl":float(ledger.net_pnl.sum()),
+                "gross_before_slippage":float(ledger.gross_before_slippage.sum()),
+                "slippage":float(ledger.slippage_cost.sum()),
+                "fees":float(ledger.fees.sum()),
+                "total_execution_cost":float(ledger.total_execution_cost.sum()),
+            }
+            if abs(metrics["ending_equity"]-(cfg.initial_equity+checks["ledger_net_pnl"]))>1e-4:
+                raise ValueError("Risk engine ending balance does not reconcile")
+            if abs(checks["gross_before_slippage"]-checks["slippage"]-checks["fees"]-checks["ledger_net_pnl"])>1e-5:
+                raise ValueError("Gross, costs and net P&L do not reconcile")
+            comparisons[mode]={"policy":asdict(run_cfg),"training":metrics,
+                "cost_reconciliation":checks}
+        report["strategies"][name]={"signal_parameters":asdict(spec),"comparison":comparisons,
+            "trade_count_delta_transition_minus_level":
+                comparisons["transition"]["training"]["trades"]-comparisons["level"]["training"]["trades"],
+            "return_delta_percentage_points":
+                comparisons["transition"]["training"]["return_pct"]-comparisons["level"]["training"]["return_pct"]}
     (root/"risk_comparison.json").write_text(json.dumps(report,indent=2,allow_nan=False)+"\n")
     return report
 
