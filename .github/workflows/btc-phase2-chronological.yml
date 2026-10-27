@@ -52,6 +52,8 @@ jobs:
         env:
           SIGNAL_TIMEFRAME: ${{ inputs.timeframe }}
         run: python -m src.chronological_eval --catalog-dir data/research/gap-safe --output data/backtest/chronological --timeframe "$SIGNAL_TIMEFRAME"
+      - name: Generate audited performance report (training/validation only)
+        run: python -m src.performance_report --input-dir data/backtest/chronological --output data/backtest/chronological/performance_report.json
       - name: Archive evaluation artifacts
         if: always()
         uses: actions/upload-artifact@v4
