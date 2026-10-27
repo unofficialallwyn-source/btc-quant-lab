@@ -10,6 +10,12 @@ on:
         description: Exclusive UTC research end
         required: true
         default: '2026-10-26'
+      timeframe:
+        description: Fully closed higher-timeframe signal (1m execution)
+        required: true
+        type: choice
+        options: ['1m', '5m', '15m', '1h', '4h']
+        default: '5m'
 permissions:
   contents: read
   id-token: write
@@ -43,7 +49,9 @@ jobs:
           END: ${{ inputs.end }}
         run: python -m src.gap_safe_dataset --start "$START" --end "$END" --output-dir data/research/gap-safe
       - name: Evaluate training and validation only (holdout locked)
-        run: python -m src.chronological_eval --catalog-dir data/research/gap-safe --output data/backtest/chronological
+        env:
+          SIGNAL_TIMEFRAME: ${{ inputs.timeframe }}
+        run: python -m src.chronological_eval --catalog-dir data/research/gap-safe --output data/backtest/chronological --timeframe "$SIGNAL_TIMEFRAME"
       - name: Archive evaluation artifacts
         if: always()
         uses: actions/upload-artifact@v4
