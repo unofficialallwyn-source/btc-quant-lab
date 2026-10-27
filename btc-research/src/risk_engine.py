@@ -24,8 +24,11 @@ class RiskPolicy:
     risk_fraction:float=.005
     max_exposure:float=1.
     initial_equity:float=1000.
+    entry_mode:str="level"  # "level" retains prior baseline for paired comparison
 
     def validate(self):
+        if self.entry_mode not in ("transition","level"):
+            raise ValueError("Invalid entry mode")
         if self.max_hold_minutes<1 or self.cooldown_minutes<0 or not 0<self.daily_loss_limit_fraction<1:
             raise ValueError("Invalid holding/cooldown/daily loss")
         if self.funding_guard_minutes<0 or self.funding_guard_minutes>=240:
@@ -83,7 +86,7 @@ def run_risk(segments,signal_fn,policy=None,signal_tf="5m"):
             # Realized and mark-to-market loss limit prohibits new entries.
             mark_equity=cash if pos is None else cash+pos["side"]*(float(bar.open)-pos["entry"])*pos["qty"]
             if mark_equity<=day_start*(1-cfg.daily_loss_limit_fraction):day_locked=True
-            if pos is None and i>0 and i-1>last_exit and signals[i-1]:
+            if pos is None and i>0 and i-1>last_exit and signals[i-1] and (cfg.entry_mode=="level" or (i>=2 and signals[i-2]!=signals[i-1])):
                 counters["signals"]+=1
                 if day_locked:
                     counters["blocked_daily_loss"]+=1
@@ -102,7 +105,7 @@ def run_risk(segments,signal_fn,policy=None,signal_tf="5m"):
                             cash-=fee
                             pos=dict(side=side,entry=entry,qty=qty,entry_time=t,
                                 stop=entry-side*distance,target=entry+side*distance*cfg.reward_multiple,
-                                fee=fee)
+                                fee=fee,raw_entry=float(bar.open))
                         else:
                             counters["blocked_balance"]+=1
                     else:
@@ -130,10 +133,16 @@ def run_risk(segments,signal_fn,policy=None,signal_tf="5m"):
                     gross=side*(fill-pos["entry"])*pos["qty"]
                     exit_fee=fill*pos["qty"]*cfg.fee_rate
                     cash+=gross-exit_fee
+                    raw_gross=side*(float(price)-pos["raw_entry"])*pos["qty"]
+                    slippage_cost=raw_gross-gross
+                    if slippage_cost < -1e-7:
+                        raise AssertionError("Adverse slippage unexpectedly improved execution")
                     trades.append(dict(segment_id=seg_id,entry_time=pos["entry_time"],
                         exit_time=t,side=side,entry=pos["entry"],exit=fill,quantity=pos["qty"],
                         gross_pnl=gross,fees=pos["fee"]+exit_fee,
-                        net_pnl=gross-pos["fee"]-exit_fee,exit_reason=reason))
+                        net_pnl=gross-pos["fee"]-exit_fee,exit_reason=reason,
+                        gross_before_slippage=raw_gross,slippage_cost=slippage_cost,
+                        total_execution_cost=slippage_cost+pos["fee"]+exit_fee))
                     pos=None;last_exit=i;closed_at=t
             eq=cash if pos is None else cash+pos["side"]*(float(bar.close)-pos["entry"])*pos["qty"]
             if eq<=day_start*(1-cfg.daily_loss_limit_fraction):day_locked=True
@@ -142,7 +151,8 @@ def run_risk(segments,signal_fn,policy=None,signal_tf="5m"):
         if pos is not None:raise AssertionError("Position carried beyond gap")
         segment_diagnostics.append({"segment_id":seg_id,**counters})
     ledger=pd.DataFrame(trades,columns=["segment_id","entry_time","exit_time","side","entry","exit",
-        "quantity","gross_pnl","fees","net_pnl","exit_reason"])
+        "quantity","gross_pnl","fees","net_pnl","exit_reason",
+        "gross_before_slippage","slippage_cost","total_execution_cost"])
     equity=pd.DataFrame(curve,columns=["time","segment_id","equity"])
     peak=equity.equity.cummax().clip(lower=cfg.initial_equity) if not equity.empty else pd.Series(dtype=float)
     dd=((peak-equity.equity)/peak).max()*100 if not equity.empty else 0.
@@ -153,7 +163,14 @@ def run_risk(segments,signal_fn,policy=None,signal_tf="5m"):
         max_drawdown_pct=round(float(dd),4),trades=len(ledger),
         win_rate_pct=round(100*len(wins)/len(ledger),4) if len(ledger) else None,
         profit_factor=round(float(wins.sum()/-losses.sum()),4) if len(losses) else None,
-        fee_total=float(ledger.fees.sum()),segments=len(segments),
+        fee_total=float(ledger.fees.sum()),
+        slippage_total=float(ledger.slippage_cost.sum()),
+        gross_before_slippage_total=float(ledger.gross_before_slippage.sum()),
+        cost_by_exit_reason={str(reason):{"trades":int(len(g)),
+            "gross_before_slippage":float(g.gross_before_slippage.sum()),
+            "slippage":float(g.slippage_cost.sum()),"fees":float(g.fees.sum()),
+            "net_pnl":float(g.net_pnl.sum())} for reason,g in ledger.groupby("exit_reason")},
+        entry_mode=cfg.entry_mode,segments=len(segments),
         exit_reasons={str(k):int(v) for k,v in ledger.exit_reason.value_counts().items()},
         average_hold_minutes=float(((ledger.exit_time-ledger.entry_time)/60).mean()) if len(ledger) else None,
         entry_decisions={key:sum(int(d[key]) for d in segment_diagnostics) for key in ("signals","entries","blocked_cooldown","blocked_funding","blocked_daily_loss","blocked_atr","blocked_balance")},
