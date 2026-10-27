@@ -59,8 +59,8 @@ def evaluate(folder, output, *, include_holdout=False, config=None,
              signal_fn=breakout_signal, train_fraction=.60,
              validation_fraction=.20):
     catalog,pieces=read_segments(folder)
-    start=int(pd.Timestamp(catalog["start_utc"],tz="UTC").timestamp())
-    end=int(pd.Timestamp(catalog["end_exclusive_utc"],tz="UTC").timestamp())
+    start=int(pd.Timestamp(catalog["start_utc"]).timestamp())
+    end=int(pd.Timestamp(catalog["end_exclusive_utc"]).timestamp())
     windows=boundaries(start,end,train_fraction,validation_fraction)
     output=Path(output)
     output.mkdir(parents=True,exist_ok=True)
