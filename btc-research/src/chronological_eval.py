@@ -14,6 +14,7 @@ import pandas as pd
 
 from .sim_engine import Config, run, breakout_signal
 from .research_segments import segments
+from .multi_timeframe import SECONDS, causal_breakout_signal
 
 
 def boundaries(start, end, train_fraction=0.60, validation_fraction=0.20):
@@ -57,7 +58,13 @@ def read_segments(folder):
 
 def evaluate(folder, output, *, include_holdout=False, config=None,
              signal_fn=breakout_signal, train_fraction=.60,
-             validation_fraction=.20):
+             validation_fraction=.20, timeframe="1m"):
+    if timeframe not in SECONDS:
+        raise ValueError("Unsupported timeframe")
+    if timeframe != "1m" and signal_fn is not breakout_signal:
+        raise ValueError("Custom signal_fn with HTF requires explicit causal adapter")
+    strategy_signal=(signal_fn if timeframe=="1m" else
+                     lambda frame: causal_breakout_signal(frame,timeframe))
     catalog,pieces=read_segments(folder)
     start=int(pd.Timestamp(catalog["start_utc"]).timestamp())
     end=int(pd.Timestamp(catalog["end_exclusive_utc"]).timestamp())
@@ -70,6 +77,8 @@ def evaluate(folder, output, *, include_holdout=False, config=None,
                               "end_exclusive_utc":datetime.fromtimestamp(b,timezone.utc).isoformat()}
                      for name,(a,b) in windows.items()},
         "strategy":"20-bar channel breakout baseline",
+        "signal_timeframe":timeframe,"execution_timeframe":"1m",
+        "signal_timing":"completed HTF bar only; next 1m bar open fill",
         "config":asdict(config or Config()),"results":{}}
     for name,(lo,hi) in windows.items():
         if name=="holdout" and not include_holdout:
@@ -83,7 +92,7 @@ def evaluate(folder, output, *, include_holdout=False, config=None,
         if not within:
             summary["results"][name]={"status":"no_verified_candles","segments":0}
             continue
-        result,trades,equity=run(within,signal_fn,config)
+        result,trades,equity=run(within,strategy_signal,config)
         result["status"]="evaluated"
         result["verified_candles"]=sum(len(x) for x in within)
         summary["results"][name]=result
@@ -99,9 +108,10 @@ def main():
     p.add_argument("--output",default="data/backtest/chronological")
     p.add_argument("--include-holdout",action="store_true",
                    help="Final evaluation only, after strategy is frozen; never for tuning")
+    p.add_argument("--timeframe",choices=tuple(SECONDS),default="1m")
     args=p.parse_args()
     print(json.dumps(evaluate(args.catalog_dir,args.output,
-                              include_holdout=args.include_holdout),indent=2))
+                              include_holdout=args.include_holdout,timeframe=args.timeframe),indent=2))
 
 
 if __name__=="__main__":
