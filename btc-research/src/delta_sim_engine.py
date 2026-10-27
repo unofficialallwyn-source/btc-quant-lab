@@ -158,10 +158,10 @@ def run_delta(segments,signal_fn,mark_by_time,fx_by_time,funding_by_time,
     else:
         peaks=curve.equity_inr.cummax().clip(lower=float(initial))
         drawdown=float(((peaks-curve.equity_inr)/peaks).max()*100)
-    return dict(currency="INR",initial_equity_inr=float(initial),
+    return (dict(currency="INR",initial_equity_inr=float(initial),
         ending_equity_inr=float(cash),return_pct=float((cash/initial-1)*100),
         max_drawdown_pct=drawdown,trade_count=len(ledger),total_fee_inr=float(fees_paid),
         net_funding_paid_inr=float(funding_paid),segments=len(segments),
         liquidation_status="no maintenance threshold breach observed at minute marks",
         execution_model="taker, next-minute open, adverse slippage, stop-first, 1m mark"),
-        ledger,curve
+        ledger,curve)
