@@ -1,0 +1,47 @@
+name: BTC Delta external-feed discovery
+on:
+  workflow_dispatch:
+    inputs:
+      probe_start:
+        description: UTC beginning (training period only; YYYY-MM-DD)
+        required: true
+        default: '2025-10-20'
+      probe_end:
+        description: Exclusive UTC end (max 7 days)
+        required: true
+        default: '2025-10-21'
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: btc-research
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: btc-research/requirements.txt
+      - run: python -m pip install -r requirements.txt
+      - name: Test all research and historical feed safeguards
+        run: python -m pytest -q
+      - name: Collect small historical mark and funding API samples
+        env:
+          START: ${{ inputs.probe_start }}
+          END: ${{ inputs.probe_end }}
+        run: |
+          START_TS=$(date -u -d "$START 00:00:00" +%s)
+          END_TS=$(date -u -d "$END 00:00:00" +%s)
+          python -m src.delta_feed_probe --start "$START_TS" --end "$END_TS" --output data/research/delta-feed-probe
+      - name: Archive sourced API probe, checksum and data availability
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: btc-delta-feed-probe-${{ github.run_id }}
+          path: btc-research/data/research/delta-feed-probe/
+          if-no-files-found: warn
+          retention-days: 30
