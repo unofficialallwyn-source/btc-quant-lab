@@ -63,7 +63,7 @@ def run_risk(segments,signal_fn,policy=None,signal_tf="5m"):
     cfg=policy or RiskPolicy()
     cfg.validate()
     if signal_tf not in SECONDS:raise ValueError("Unsupported signal timeframe")
-    cash=float(cfg.initial_equity);trades=[];curve=[];closed_at=None
+    cash=float(cfg.initial_equity);trades=[];curve=[];closed_at=None;segment_diagnostics=[]
     for seg_id,raw in enumerate(segments,1):
         frame=raw.sort_values("time").reset_index(drop=True)
         if frame.empty:continue
@@ -73,7 +73,7 @@ def run_risk(segments,signal_fn,policy=None,signal_tf="5m"):
         if len(signals)!=len(frame) or any(s not in (-1,0,1) for s in signals):
             raise ValueError("Invalid signal vector")
         atr=completed_atr(frame,signal_tf,cfg.atr_period)
-        pos=None;last_exit=-1
+        pos=None;last_exit=-1; counters={"signals":0,"entries":0,"blocked_cooldown":0,"blocked_funding":0,"blocked_daily_loss":0,"blocked_atr":0,"blocked_balance":0}
         current_day=None;day_start=cash;day_locked=False
         for i,bar in enumerate(frame.itertuples(index=False)):
             t=int(bar.time);day=t//86400
@@ -83,18 +83,30 @@ def run_risk(segments,signal_fn,policy=None,signal_tf="5m"):
             # Realized and mark-to-market loss limit prohibits new entries.
             mark_equity=cash if pos is None else cash+pos["side"]*(float(bar.open)-pos["entry"])*pos["qty"]
             if mark_equity<=day_start*(1-cfg.daily_loss_limit_fraction):day_locked=True
-            if pos is None and i>0 and i-1>last_exit and not day_locked and signals[i-1]:
-                if (closed_at is None or t-closed_at>=cfg.cooldown_minutes*60) and not _near_funding(t,cfg.funding_guard_minutes):
+            if pos is None and i>0 and i-1>last_exit and signals[i-1]:
+                counters["signals"]+=1
+                if day_locked:
+                    counters["blocked_daily_loss"]+=1
+                elif closed_at is not None and t-closed_at<cfg.cooldown_minutes*60:
+                    counters["blocked_cooldown"]+=1
+                elif _near_funding(t,cfg.funding_guard_minutes):
+                    counters["blocked_funding"]+=1
+                else:
                     distance=float(atr.iloc[i-1])*cfg.atr_stop_multiple
                     side=int(signals[i-1]);entry=float(bar.open)*(1+side*cfg.slippage_rate)
                     if math.isfinite(distance) and 0<distance<entry:
                         qty=min(cash*cfg.risk_fraction/distance,cash*cfg.max_exposure/entry)
                         fee=qty*entry*cfg.fee_rate
                         if qty>0 and fee<cash:
+                            counters["entries"]+=1
                             cash-=fee
                             pos=dict(side=side,entry=entry,qty=qty,entry_time=t,
                                 stop=entry-side*distance,target=entry+side*distance*cfg.reward_multiple,
                                 fee=fee)
+                        else:
+                            counters["blocked_balance"]+=1
+                    else:
+                        counters["blocked_atr"]+=1
             if pos is not None:
                 side=pos["side"];stop=pos["stop"];target=pos["target"]
                 price=None;reason=None
@@ -128,6 +140,7 @@ def run_risk(segments,signal_fn,policy=None,signal_tf="5m"):
             curve.append(dict(time=t,segment_id=seg_id,equity=eq))
         # Segment end must always close all positions, before a data gap.
         if pos is not None:raise AssertionError("Position carried beyond gap")
+        segment_diagnostics.append({"segment_id":seg_id,**counters})
     ledger=pd.DataFrame(trades,columns=["segment_id","entry_time","exit_time","side","entry","exit",
         "quantity","gross_pnl","fees","net_pnl","exit_reason"])
     equity=pd.DataFrame(curve,columns=["time","segment_id","equity"])
@@ -141,4 +154,7 @@ def run_risk(segments,signal_fn,policy=None,signal_tf="5m"):
         win_rate_pct=round(100*len(wins)/len(ledger),4) if len(ledger) else None,
         profit_factor=round(float(wins.sum()/-losses.sum()),4) if len(losses) else None,
         fee_total=float(ledger.fees.sum()),segments=len(segments),
+        exit_reasons={str(k):int(v) for k,v in ledger.exit_reason.value_counts().items()},
+        average_hold_minutes=float(((ledger.exit_time-ledger.entry_time)/60).mean()) if len(ledger) else None,
+        entry_decisions={key:sum(int(d[key]) for d in segment_diagnostics) for key in ("signals","entries","blocked_cooldown","blocked_funding","blocked_daily_loss","blocked_atr","blocked_balance")},
         funding_modeled=False,model="linear research only; funding excluded"),ledger,equity
