@@ -28,7 +28,7 @@ def test_report_reconciles_and_excludes_holdout(tmp_path):
     r=build_report(root)
     assert not r["holdout_evaluated"]
     assert "holdout" not in r["partitions"]
-    assert r["partitions"]["training"]["max_drawdown_pct"]==5
+    assert r["partitions"]["training"]["max_drawdown_pct"]==pytest.approx(5.0,abs=1e-9)
     assert r["partitions"]["training"]["expectancy_per_trade"]==28
     assert r["partitions"]["validation"]["total_fees"]==2
     assert (root/"performance_report.json").exists()
