@@ -1,0 +1,56 @@
+name: BTC Phase 2 simulation baseline
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: Inclusive UTC date
+        required: true
+        default: '2024-02-03'
+      end:
+        description: Exclusive UTC date (fixed research period)
+        required: true
+        default: '2026-10-26'
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  simulate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    defaults:
+      run:
+        working-directory: btc-research
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: btc-research/requirements.txt
+      - run: python -m pip install -r requirements.txt
+      - name: Test simulation and data integrity
+        run: python -m pytest -q
+      - name: Authenticate read-only data access via Azure OIDC
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Assemble verified gap-safe historical dataset
+        env:
+          BTC_AZURE_AUTH: oidc
+          START: ${{ inputs.start }}
+          END: ${{ inputs.end }}
+        run: python -m src.gap_safe_dataset --start "$START" --end "$END" --output-dir data/research/gap-safe
+      - name: Run simulation-only breakout baseline
+        run: python -m src.sim_cli --catalog-dir data/research/gap-safe --output data/backtest/baseline
+      - name: Archive immutable simulation results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: btc-phase2-baseline-${{ github.run_id }}
+          path: |
+            btc-research/data/backtest/baseline/
+            btc-research/data/research/gap-safe/dataset_catalog.json
+          if-no-files-found: warn
+          retention-days: 30
