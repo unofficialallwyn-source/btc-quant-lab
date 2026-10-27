@@ -1,0 +1,91 @@
+name: BTC Phase 2 Step 3 integrated Delta validation
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: Inclusive research UTC date
+        required: true
+        default: '2024-02-03'
+      end:
+        description: Exclusive research UTC date
+        required: true
+        default: '2026-10-26'
+      timeframe:
+        description: Completed-bar signal timeframe
+        type: choice
+        options: ['1m', '5m', '15m', '1h', '4h']
+        default: '5m'
+      external_blob_prefix:
+        description: Optional Azure Blob relative folder with verified mark_1m.csv, fx_1m.csv, funding_8h.csv, source_manifest.json
+        required: false
+        default: ''
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  phase2-step3:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    defaults:
+      run:
+        working-directory: btc-research
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: btc-research/requirements.txt
+      - name: Install pinned-range dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Run all unit and integration regression tests
+        run: python -m pytest -q
+      - name: Azure read-only OIDC
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Rebuild checksum-verified historical research catalog
+        env:
+          BTC_AZURE_AUTH: oidc
+          START: ${{ inputs.start }}
+          END: ${{ inputs.end }}
+        run: python -m src.gap_safe_dataset --start "$START" --end "$END" --output-dir data/research/gap-safe
+      - name: Market input readiness gate
+        id: gate
+        env:
+          EXTERNAL_PREFIX: ${{ inputs.external_blob_prefix }}
+        run: |
+          mkdir -p data/backtest/delta
+          if [ -z "$EXTERNAL_PREFIX" ]; then
+            echo '{"status":"BLOCKED_MISSING_EXTERNAL_MARK_FX_FUNDING","holdout_evaluated":false,"message":"Supply verified historical series in Azure and rerun with external_blob_prefix. Unit tests passed; realistic historical PnL not produced."}' > data/backtest/delta/readiness.json
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Exchange-realistic evaluation blocked: required historical mark, INR/USD FX and funding event sources not provided."
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Download historical external market observations from Azure
+        if: steps.gate.outputs.ready == 'true'
+        env:
+          BTC_AZURE_AUTH: oidc
+          EXTERNAL_PREFIX: ${{ inputs.external_blob_prefix }}
+        run: python -m src.delta_external_blob --prefix "$EXTERNAL_PREFIX" --output data/research/delta-external
+      - name: Run INR Delta-specified training and validation (holdout locked)
+        if: steps.gate.outputs.ready == 'true'
+        env:
+          TIMEFRAME: ${{ inputs.timeframe }}
+        run: |
+          python -m src.delta_eval --catalog-dir data/research/gap-safe \
+            --external-dir data/research/delta-external --timeframe "$TIMEFRAME" \
+            --output data/backtest/delta
+      - name: Archive provenance, coverage and simulated research
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: btc-phase2-step3-${{ github.run_id }}
+          path: |
+            btc-research/data/backtest/delta/
+            btc-research/data/research/gap-safe/dataset_catalog.json
+          if-no-files-found: warn
+          retention-days: 30
