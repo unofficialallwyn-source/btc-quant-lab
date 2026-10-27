@@ -1,7 +1,17 @@
 """Forensic regression checks on risk-engine decision counts and accounting."""
 import pytest
 from src.risk_engine import RiskPolicy,run_risk
-from tests.test_risk_engine import frame,fixed_signal
+import pandas as pd
+
+
+def frame(n=180,start=3600):
+    return pd.DataFrame({"time":[start+60*i for i in range(n)],
+        "open":[100.0]*n,"high":[100.2]*n,"low":[99.8]*n,
+        "close":[100.0]*n,"volume":[1.0]*n})
+
+
+def fixed_signal(f):
+    return [1]*len(f)
 
 
 def test_entry_accounting_and_diagnostic_counts():
