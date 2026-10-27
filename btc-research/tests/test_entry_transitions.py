@@ -53,7 +53,7 @@ def test_invalid_entry_mode_fails():
 
 def test_transition_resets_on_segment_boundary():
     cfg=RiskPolicy(atr_period=2,max_hold_minutes=3,cooldown_minutes=0,
-        funding_guard_minutes=0)
+        funding_guard_minutes=0,entry_mode="transition")
     # One signal transition per segment, no lookback across true gap.
     f1=frame(start=3600)
     f2=frame(start=3600+240*60+3600)
