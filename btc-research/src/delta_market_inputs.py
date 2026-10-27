@@ -46,9 +46,6 @@ def load_inputs(folder):
             raise ValueError(f"Missing historical-input provenance: {name}")
     if manifest.get("fx_policy")!="delta_india_fixed_85" and not str(manifest.get("fx_source","")).strip():
         raise ValueError("Missing historical-input provenance: fx_source")
-    for name in ():
-        if not str(manifest.get(name,"")).strip():
-            raise ValueError(f"Missing historical-input provenance: {name}")
     if manifest.get("synthetic",False):
         raise ValueError("Synthetic provenance forbidden for real historical validation")
     if manifest.get("methodology") in ("assumed_constant","inferred_from_traded_candles"):
