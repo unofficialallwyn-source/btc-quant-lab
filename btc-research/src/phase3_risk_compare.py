@@ -34,7 +34,14 @@ def evaluate(catalog_dir,output,signal_tf="5m",context_tf="1h"):
         metrics,ledger,equity=run_risk(partition,lambda frame:signals(frame,spec),cfg,signal_tf)
         ledger.to_csv(root/f"{name}_training_trades.csv",index=False)
         equity.to_csv(root/f"{name}_training_equity.csv",index=False)
-        report["strategies"][name]={"signal_parameters":asdict(spec),"training":metrics}
+        report["strategies"][name]={"signal_parameters":asdict(spec),"training":metrics,
+            "diagnostics":{"net_pnl_check":float(ledger.net_pnl.sum()) if len(ledger) else 0.0,
+                "fees_to_initial_equity_pct":100*metrics["fee_total"]/cfg.initial_equity,
+                "exit_reason_counts":metrics["exit_reasons"],
+                "entry_decisions":metrics["entry_decisions"],
+                "total_holding_hours":float((ledger.exit_time-ledger.entry_time).sum()/3600) if len(ledger) else 0.0}}
+        if abs(metrics["ending_equity"]-(cfg.initial_equity+float(ledger.net_pnl.sum())))>1e-4:
+            raise ValueError("Risk engine balance does not reconcile to ledger")
     (root/"risk_comparison.json").write_text(json.dumps(report,indent=2,allow_nan=False)+"\n")
     return report
 
