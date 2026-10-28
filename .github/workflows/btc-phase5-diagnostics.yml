@@ -1,0 +1,71 @@
+name: BTC Phase 5 trade failure diagnostics
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: Inclusive UTC research start
+        required: true
+        default: '2024-02-03'
+      end:
+        description: Exclusive UTC research end
+        required: true
+        default: '2026-10-26'
+      source_run_id:
+        description: Frozen Phase 4 training backtest run ID
+        required: true
+        default: '40735017966'
+permissions:
+  contents: read
+  id-token: write
+  actions: read
+jobs:
+  risk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    defaults:
+      run:
+        working-directory: btc-research
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: btc-research/requirements.txt
+      - run: python -m pip install -r requirements.txt
+      - name: Run all regression tests
+        run: python -m pytest -q
+      - name: Download frozen Phase 4 evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: btc-phase4-walkforward-${{ inputs.source_run_id }}
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+          path: btc-research/data/phase4-frozen
+      - name: Authenticate Azure read only OIDC
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Assemble verified historical data
+        env:
+          BTC_AZURE_AUTH: oidc
+          START: ${{ inputs.start }}
+          END: ${{ inputs.end }}
+        run: python -m src.gap_safe_dataset --start "$START" --end "$END" --output-dir data/research/gap-safe
+      - name: Reconstruct exact training trades and verify against Phase 4
+        run: |
+          REPORT=$(find data/phase4-frozen -type f -name walkforward_report.json)
+          test "$(printf '%s\\n' "$REPORT" | sed '/^$/d' | wc -l)" -eq 1
+          python -m src.phase5_failure_diagnostics --catalog-dir data/research/gap-safe --phase4-report "$REPORT" --output data/backtest/phase5-diagnostics
+      - name: Archive training-only experiment
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: btc-phase5-diagnostics-${{ github.run_id }}
+          path: |
+            btc-research/data/backtest/phase5-diagnostics/
+            btc-research/data/research/gap-safe/dataset_catalog.json
+          if-no-files-found: warn
+          retention-days: 30
