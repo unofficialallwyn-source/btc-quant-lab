@@ -144,7 +144,7 @@ def main():
     args=p.parse_args()
     out=Path(args.output)
     out.parent.mkdir(parents=True,exist_ok=True)
-    out.write_text(json.dumps(research_specs(),indent=2,allow_nan=False)+"\\n")
+    out.write_text(json.dumps(research_specs(),indent=2,allow_nan=False)+"\n")
     print(json.dumps({"phase":"4_step_3","hypotheses":list(NAMES),
       "validation_evaluated":False,"holdout_evaluated":False},indent=2))
 
