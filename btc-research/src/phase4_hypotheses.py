@@ -135,3 +135,18 @@ def research_specs():
           "entry":"first completed 1h trend-score crossing +/-1.0 from weaker state; 5m breakout agrees, volume and cost gate",
           "exit":"frozen risk-policy ATR stop/target, 60m time limit or funding-window flat",
           "prediction":"continuation near directional regime change, not yet tested"}}}
+
+def main():
+    import argparse,json
+    from pathlib import Path
+    p=argparse.ArgumentParser()
+    p.add_argument("--output",required=True)
+    args=p.parse_args()
+    out=Path(args.output)
+    out.parent.mkdir(parents=True,exist_ok=True)
+    out.write_text(json.dumps(research_specs(),indent=2,allow_nan=False)+"\\n")
+    print(json.dumps({"phase":"4_step_3","hypotheses":list(NAMES),
+      "validation_evaluated":False,"holdout_evaluated":False},indent=2))
+
+if __name__=="__main__":
+    main()
