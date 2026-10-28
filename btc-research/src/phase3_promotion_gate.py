@@ -67,6 +67,12 @@ def decide(optimization, catalog, source_run_id):
             x["trades"] >= MIN_TRADES_PER_FOLD and x["net_pnl"] > 0 and
             x["profit_factor"] is not None and x["profit_factor"] > 1 and
             x["max_drawdown_pct"] <= 25 for x in observations)
+        _check(abs(c["worst_fold_return_pct"]-
+                   min(x["return_pct"] for x in observations)) < 1e-6,
+               "worst-fold return mismatch")
+        _check(abs(c["max_fold_drawdown_pct"]-
+                   max(x["max_drawdown_pct"] for x in observations)) < 1e-6,
+               "fold drawdown mismatch")
         _check(c.get("qualifies") is qualifies, "candidate eligibility mismatch")
         _check(abs(c["all_fold_net_pnl"]-
                    sum(x["net_pnl"] for x in observations)) < 1e-5,
