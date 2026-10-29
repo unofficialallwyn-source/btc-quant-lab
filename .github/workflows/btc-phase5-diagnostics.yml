@@ -57,7 +57,9 @@ jobs:
       - name: Reconstruct exact training trades and verify against Phase 4
         run: |
           REPORT=$(find data/phase4-frozen -type f -name walkforward_report.json)
-          test "$(printf '%s\\n' "$REPORT" | sed '/^$/d' | wc -l)" -eq 1
+          test -n "$REPORT"
+          test -f "$REPORT"
+          test "$(find data/phase4-frozen -type f -name walkforward_report.json | wc -l)" -eq 1
           python -m src.phase5_failure_diagnostics --catalog-dir data/research/gap-safe --phase4-report "$REPORT" --output data/backtest/phase5-diagnostics
       - name: Archive training-only experiment
         if: always()
