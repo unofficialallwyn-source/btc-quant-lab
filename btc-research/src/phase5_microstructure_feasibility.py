@@ -54,7 +54,7 @@ def evaluate(path,output):
     r=audit(json.loads(raw),raw)
     target=Path(output)
     target.mkdir(parents=True,exist_ok=True)
-    (target/"microstructure_feasibility.json").write_text(json.dumps(r,indent=2,allow_nan=False)+"\\n")
+    (target/"microstructure_feasibility.json").write_text(json.dumps(r,indent=2,allow_nan=False)+chr(10))
     return r
 
 def main():
