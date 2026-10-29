@@ -23,37 +23,40 @@ def positive(value):
         return False
 
 def check_trades(result):
-    issues = []
-    records = result.get("trades") if isinstance(result, dict) else None
-    if not isinstance(records, list):
-        return {"count": 0, "schema_accepted": False, "issues": ["missing_trades_array"],
+    """Actual Delta India REST response: result is a list; buyer/seller roles identify taker."""
+    records = result if isinstance(result, list) else None
+    if records is None:
+        return {"count": 0, "schema_accepted": False, "issues": ["result_not_list"],
                 "aggressor_side_verified": False, "unique_trade_ids_verified": False}
-    timestamps = []
-    sides = []
-    ids = []
+    issues, times, sides, ids = [], [], [], []
     for idx, trade in enumerate(records):
         if not isinstance(trade, dict):
             issues.append(f"trade_{idx}_not_object")
             continue
-        if trade.get("side") not in ("buy", "sell"):
-            issues.append(f"trade_{idx}_invalid_aggressor_side")
+        buyer, seller = trade.get("buyer_role"), trade.get("seller_role")
+        if (buyer, seller) == ("taker", "maker"):
+            sides.append("buy")
+        elif (buyer, seller) == ("maker", "taker"):
+            sides.append("sell")
         else:
-            sides.append(trade["side"])
+            issues.append(f"trade_{idx}_invalid_roles")
         if not positive(trade.get("price")) or not positive(trade.get("size")):
             issues.append(f"trade_{idx}_invalid_price_or_size")
         t = trade.get("timestamp")
-        if not isinstance(t, (int, float)) or isinstance(t, bool) or t <= 0:
-            issues.append(f"trade_{idx}_invalid_timestamp")
+        # Delta REST sample uses Unix epoch microseconds; ensure correct magnitude
+        # without confusing sampled recent trades with a contiguous trade archive.
+        if not isinstance(t, int) or isinstance(t, bool) or not 10**15 <= t < 10**17:
+            issues.append(f"trade_{idx}_invalid_microsecond_timestamp")
         else:
-            timestamps.append(t)
+            times.append(t)
         if trade.get("id") is not None:
             ids.append(str(trade["id"]))
-    ids_ok = len(records) > 0 and len(ids) == len(records) and len(ids) == len(set(ids))
-    return {"count": len(records), "schema_accepted": len(records) > 0 and not issues,
-            "issues": issues[:100], "aggressor_side_verified": len(records) > 0 and len(sides) == len(records),
-            "unique_trade_ids_verified": ids_ok,
-            "timestamp_min": min(timestamps) if timestamps else None,
-            "timestamp_max": max(timestamps) if timestamps else None,
+    ids_ok = bool(records) and len(ids) == len(records) and len(ids) == len(set(ids))
+    return {"count": len(records), "schema_accepted": bool(records) and not issues,
+            "issues": issues[:100], "aggressor_side_verified": bool(records) and len(sides) == len(records),
+            "unique_trade_ids_verified": ids_ok, "timestamp_unit": "epoch_microseconds",
+            "timestamp_min": min(times) if times else None,
+            "timestamp_max": max(times) if times else None,
             "historical_lookback_verified": False}
 
 def check_book(result):
