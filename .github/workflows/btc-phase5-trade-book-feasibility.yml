@@ -1,0 +1,33 @@
+name: BTC Phase 5 trade book feasibility
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  feasibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: btc-research
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: btc-research/requirements.txt
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Run regression tests
+        run: python -m pytest -q
+      - name: Generate fail-closed capability report
+        run: python -m src.phase5_trade_book_feasibility --output data/research/phase5-trade-book
+      - name: Archive report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: btc-phase5-trade-book-${{ github.run_id }}
+          path: btc-research/data/research/phase5-trade-book/
+          if-no-files-found: error
+          retention-days: 90
