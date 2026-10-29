@@ -2,7 +2,7 @@ import json
 from src.phase5_readonly_pilot import assess, check_trades, check_book, pilot
 
 def trade_data():
-    return {"trades": [{"side": "buy", "price": "100.5", "size": 2, "timestamp": 123456}]}
+    return [{"buyer_role": "taker", "seller_role": "maker", "price": "100.5", "size": 2, "timestamp": 1793250194000000}]
 
 def book_data():
     return {"buy": [{"price": "100", "size": "2"}],
@@ -17,15 +17,15 @@ def test_snapshots_never_certify_history():
     assert not r["promotion_authorized"]
     assert not r["holdout_evaluated"]
 
-def test_missing_side_blocks_trade_schema():
+def test_missing_role_blocks_trade_schema():
     x = trade_data()
-    del x["trades"][0]["side"]
+    del x[0]["buyer_role"]
     assert not check_trades(x)["schema_accepted"]
 
 def test_duplicate_trade_ids_not_certified():
     x = trade_data()
-    x["trades"][0]["id"] = 1
-    x["trades"].append(dict(x["trades"][0]))
+    x[0]["id"] = 1
+    x.append(dict(x[0]))
     assert not check_trades(x)["unique_trade_ids_verified"]
 
 def test_book_cannot_be_crossed():
@@ -48,3 +48,20 @@ def test_capture_provenance_and_no_credentials(tmp_path):
     assert json.loads((tmp_path / "raw_trades.json").read_text())["success"]
     assert r["inventory"]["trades"]["sha256"]
     assert not r["holdout_evaluated"]
+
+def test_rest_observed_roles_map_to_aggressor_without_fabricating_ids():
+    x = trade_data()
+    x.append({"buyer_role": "maker", "seller_role": "taker", "price": "100", "size": 3, "timestamp": 1793250193000000})
+    result = check_trades(x)
+    assert result["schema_accepted"] is True
+    assert result["aggressor_side_verified"] is True
+    assert result["unique_trade_ids_verified"] is False
+    assert result["timestamp_unit"] == "epoch_microseconds"
+
+def test_milliseconds_or_inconsistent_roles_rejected():
+    x = trade_data()
+    x[0]["timestamp"] = 1793250194000
+    assert not check_trades(x)["schema_accepted"]
+    x = trade_data()
+    x[0]["seller_role"] = "taker"
+    assert not check_trades(x)["schema_accepted"]
