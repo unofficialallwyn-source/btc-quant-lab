@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "deny": [
+      "mcp__delta-exchange-mcp__close_all_positions",
+      "Read(./btc-research/.env)",
+      "Read(./btc-research/state/*.env)"
+    ]
+  }
+}

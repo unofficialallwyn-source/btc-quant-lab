@@ -1,12 +1,15 @@
 # BTC Quant Lab
 
-BTCUSD quantitative research with reproducible historical data, simulation-only backtesting, and strict out-of-sample evaluation. **No live trading or validated profitable strategy is provided.**
+BTCUSD quantitative research with reproducible historical data, simulation-only backtesting, and strict out-of-sample evaluation. **No validated profitable strategy is provided.** Phase 6 adds a cost-feasible, volatility-targeted trend/carry research track and a paper → testnet → live execution path that stays gated: see [`btc-research/PHASE6_TREND_CARRY.md`](btc-research/PHASE6_TREND_CARRY.md).
 
 ## Repository
 
 - `btc-research/src/ingest.py`: historical candle fetch interface, OHLCV audit, timestamp checks, and minute-to-five-minute resampling.
 - `btc-research/src/research.py`: initial Donchian breakout benchmark and chronological training/validation/holdout runs.
-- `btc-research/tests/`: foundational tests for ingestion and aggregation.
+- `btc-research/src/trend_carry.py`, `perp_backtest.py`, `overfitting.py`, `phase6_research.py`, `delta_hourly_data.py`: Phase 6 research (EWMAC + vol targeting, hourly perp ledger with funding, Deflated Sharpe / PBO / speed limit, public Delta data).
+- `btc-research/src/live/`: signed Delta India REST client and the guarded trader (paper default).
+- `.claude/agents/`, `.mcp.json`: Claude Code monitoring/review agents and the Delta Exchange MCP server config (testnet, read-only key recommended).
+- `btc-research/tests/`: regression tests.
 - `btc-research/requirements.txt`: Python dependencies.
 
 ## Run locally

@@ -1,0 +1,21 @@
+# systemd unit for the Phase 6 trader. Copy to /etc/systemd/system/, then:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now btc-trader
+# Secrets live in /etc/btc-trader.env (chmod 600), never in the repo:
+#   DELTA_API_KEY=...  DELTA_API_SECRET=...  (testnet keys first)
+#   DELTA_LIVE_CONFIRM=I_ACCEPT_REAL_MONEY_RISK   (only when deliberately going live)
+[Unit]
+Description=btc-quant-lab Phase 6 BTCUSD perpetual trader
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=btctrader
+WorkingDirectory=/opt/btc-quant-lab/btc-research
+EnvironmentFile=/etc/btc-trader.env
+ExecStart=/opt/btc-quant-lab/.venv/bin/python -m src.live.trader --mode testnet --capital-usd 1000 --max-contracts 20 --max-order-contracts 10 --execution maker_first --state-dir /var/lib/btc-trader --loop
+Restart=on-failure
+RestartSec=120
+
+[Install]
+WantedBy=multi-user.target

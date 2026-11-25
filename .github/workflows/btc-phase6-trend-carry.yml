@@ -1,0 +1,69 @@
+name: BTC Phase 6 vol-targeted trend research (public Delta data)
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: Inclusive UTC start for public Delta India 1h candles
+        required: true
+        default: '2023-01-01'
+      end:
+        description: Exclusive UTC end
+        required: true
+        default: '2026-11-25'
+      partition:
+        description: training (default) | validation | holdout (sealed)
+        type: choice
+        options: ['training', 'validation', 'holdout']
+        default: 'training'
+      confirm_frozen_spec:
+        description: Primary spec SHA-256 (required only for holdout)
+        required: false
+        default: ''
+      assume_funding_rate:
+        description: Per-8h funding rate to assume if no observed funding (blank = none)
+        required: false
+        default: ''
+permissions:
+  contents: read
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: btc-research
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: btc-research/requirements.txt
+      - run: python -m pip install -r requirements.txt
+      - name: Regression tests
+        run: python -m pytest -q
+      - name: Fetch public Delta India BTCUSD 1h candles + funding (read-only, no keys)
+        env:
+          START: ${{ inputs.start }}
+          END: ${{ inputs.end }}
+        run: python -m src.delta_hourly_data --start "$START" --end "$END" --output data/phase6
+      - name: Evaluate pre-registered Phase 6 family
+        env:
+          PARTITION: ${{ inputs.partition }}
+          SPEC: ${{ inputs.confirm_frozen_spec }}
+          FUND: ${{ inputs.assume_funding_rate }}
+        run: |
+          args=(--data-dir data/phase6 --output data/backtest/phase6 --partition "$PARTITION")
+          [ -n "$SPEC" ] && args+=(--confirm-frozen-spec "$SPEC")
+          [ -n "$FUND" ] && args+=(--assume-funding-rate "$FUND")
+          python -m src.phase6_research "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Archive
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: btc-phase6-${{ inputs.partition }}-${{ github.run_id }}
+          path: |
+            btc-research/data/phase6/manifest.json
+            btc-research/data/backtest/phase6/
+          if-no-files-found: warn
+          retention-days: 30
